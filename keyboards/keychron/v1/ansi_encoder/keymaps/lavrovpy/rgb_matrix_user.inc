@@ -1,3 +1,6 @@
+// "Dark": the default. Nothing lit, so only the overlays in keymap.c show.
+RGB_MATRIX_EFFECT(DARK)
+
 // "Mood": a slow aurora whose colour and speed follow typing speed.
 // Idle is cyan; it moves through blue and magenta to red at ~120 WPM,
 // and the bottom rows flicker like flames above 90 WPM.
@@ -11,6 +14,12 @@ RGB_MATRIX_EFFECT(MOOD)
 #    define MOOD_IDLE_DIM_MS (10UL * 60 * 1000)
 #    define MOOD_SPARKLE_MS 450
 #    define MOOD_SPARKLE_RADIUS 26
+
+static bool DARK(effect_params_t *params) {
+    RGB_MATRIX_USE_LIMITS(led_min, led_max);
+    for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, 0, 0, 0);
+    return rgb_matrix_check_finished_leds(led_max);
+}
 
 static bool MOOD(effect_params_t *params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);

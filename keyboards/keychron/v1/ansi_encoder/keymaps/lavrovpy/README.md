@@ -4,7 +4,8 @@ Stock Keychron layout and features (VIA, Keychron Launcher), plus:
 
 | What you do | What the board does |
 |---|---|
-| Type | Aurora that follows typing speed: cyan when idle, through blue and magenta to red at ~120 WPM; bottom rows flicker above 90 WPM. Each press leaves a white spark. Dims after 10 min idle. |
+| Nothing | The board is dark by default, so only the effects below light it. Fn+Q / Fn+A step through effects, including Mood. |
+| Type (Mood effect) | Aurora that follows typing speed: cyan when idle, through blue and magenta to red at ~120 WPM; bottom rows flicker above 90 WPM. Each press leaves a white spark. Dims after 10 min idle. |
 | A switch bounces | The debounce filter swallows it and that key strobes red. **Fn+B** types how many bounces each key has had since plug-in. |
 | Hold Caps (Hyper) 0.3 s | Cheat sheet for the Karabiner Hyper bindings: H/J/K/L white, F/B cyan, Backspace orange, I/U/P in English/Ukrainian/Polish flag colours. |
 | Hyper+I / U / P (switch language) | The language's flag waves across the board for 2.5 s: Union Jack, Ukraine (blue over yellow), Poland (white over red). |
