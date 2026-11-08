@@ -442,18 +442,13 @@ static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
 
 static void draw_recording(uint8_t led_min, uint8_t led_max) {
     if (recording) {
-        // Rings pulse out from the space bar while Wispr Flow is listening.
-        uint32_t t = timer_elapsed32(caps_down_at);
-        for (uint8_t i = led_min; i < led_max; i++) {
-            uint16_t d    = distance(i, 94, 61);
-            uint8_t  wave = sin8(d * 3 - (t >> 1));
-            paint(i, 248, 230, 40 + scale8(wave, 215));
-        }
-        // The right-hand column stays solid red: an "on air" light.
+        // "On air" light while Wispr Flow is listening: the board goes dark
+        // except Caps and the right-hand column, which stay solid red.
+        for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, 0, 0, 0);
         uint8_t layer = get_highest_layer(default_layer_state);
         FOR_EACH_KEY_LED({
             uint16_t kc = keymap_key_to_keycode(layer, (keypos_t){.row = row, .col = col});
-            if (kc == KC_PGUP || kc == KC_PGDN || kc == KC_HOME) paint(led, 0, 255, 255);
+            if (kc == KC_CAPS || kc == KC_PGUP || kc == KC_PGDN || kc == KC_HOME) paint(led, 0, 255, 255);
         })
         return;
     }

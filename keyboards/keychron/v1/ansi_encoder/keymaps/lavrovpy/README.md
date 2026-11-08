@@ -7,7 +7,7 @@ Stock Keychron layout and features (VIA, Keychron Launcher), plus:
 | Type | Aurora that follows typing speed: cyan when idle, through blue and magenta to red at ~120 WPM; bottom rows flicker above 90 WPM. Each press leaves a white spark. Dims after 10 min idle. |
 | A switch bounces | The debounce filter swallows it and that key strobes red. **Fn+B** types how many bounces each key has had since plug-in. |
 | Hold Caps (Hyper) 0.3 s | Cheat sheet for the Karabiner Hyper bindings: H/J/K/L white, F/B cyan, Backspace orange, I/U/P in English/Ukrainian/Polish flag colours. |
-| Double-tap and hold Caps (Wispr Flow) | Red rings pulse from the space bar while you talk, and PgUp/PgDn/Home stay solid red like an "on air" light; green flash on release. |
+| Double-tap and hold Caps (Wispr Flow) | "On air" light while you talk: the board goes dark except Caps, PgUp, PgDn and Home in solid red; green flash on release. |
 | Enter / Cmd+Enter | Gold / rainbow shockwave from the Enter key. |
 | Backspace streak | Red fills in from the right; at 16 in a row the whole board flickers. |
 | Hold Fn | Keys that do something on the Fn layer light up. |
