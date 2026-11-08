@@ -9,6 +9,10 @@
 #include "keychron_debounce.h"
 #include "via.h"
 #include "lib/lib8tion/lib8tion.h"
+#include "white_balance.h"
+
+uint8_t white_balance_g = WHITE_BALANCE_G;
+uint8_t white_balance_b = WHITE_BALANCE_B;
 
 enum layers {
     MAC_BASE,
@@ -95,15 +99,18 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #define SIGNAL_ATTENTION_MAX_MS 60000
 
 // Host signals arrive as VIA "custom set value" on the custom channel:
-// [0x07, 0x00, SIGNAL_MAGIC, signal]. The magic keeps them apart from any
-// custom values a VIA/Launcher definition might add on channel 0.
+// [0x07, 0x00, SIGNAL_MAGIC, signal, args...]. The magic keeps them apart from
+// any custom values a VIA/Launcher definition might add on channel 0.
 #define SIGNAL_MAGIC 0x4C
 enum host_signal {
-    SIGNAL_DONE      = 1,
-    SIGNAL_ATTENTION = 2,
-    SIGNAL_ERROR     = 3,
-    SIGNAL_CLEAR     = 4,
+    SIGNAL_DONE          = 1,
+    SIGNAL_ATTENTION     = 2,
+    SIGNAL_ERROR         = 3,
+    SIGNAL_CLEAR         = 4,
+    SIGNAL_WHITE_BALANCE = 5, // args: green gain, blue gain
+    SIGNAL_FLAG_TEST     = 6, // Polish and Ukrainian flags side by side
 };
+#define FLAG_TEST_MS 20000
 
 // Timestamps use timer_read32() | 1 so that 0 can mean "not active".
 static uint32_t stamp(void) {
@@ -128,7 +135,7 @@ static uint8_t  rage_fade_from;
 static uint32_t rage_fade_at;
 static uint8_t  signal_kind;
 static uint32_t signal_at;
-enum flag { FLAG_NONE, FLAG_ENGLISH, FLAG_UKRAINIAN, FLAG_POLISH };
+enum flag { FLAG_NONE, FLAG_ENGLISH, FLAG_UKRAINIAN, FLAG_POLISH, FLAG_TEST };
 static uint8_t  flag_shown;
 static uint32_t flag_at;
 static uint8_t  volume_level = VOLUME_STEPS / 2;
@@ -317,6 +324,17 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
         }
         if (kind == SIGNAL_CLEAR) {
             signal_kind = 0;
+            flag_shown  = FLAG_NONE;
+            return;
+        }
+        if (kind == SIGNAL_WHITE_BALANCE && length > 5) {
+            white_balance_g = data[4];
+            white_balance_b = data[5];
+            return;
+        }
+        if (kind == SIGNAL_FLAG_TEST) {
+            flag_shown = FLAG_TEST;
+            flag_at    = stamp();
             return;
         }
     }
@@ -328,7 +346,7 @@ void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
 static uint8_t brightness;
 
 static void paint(uint8_t led, uint8_t h, uint8_t s, uint8_t v) {
-    rgb_t rgb = hsv_to_rgb((hsv_t){h, s, scale8(v, brightness)});
+    rgb_t rgb = white_balance(hsv_to_rgb((hsv_t){h, s, scale8(v, brightness)}));
     rgb_matrix_set_color(led, rgb.r, rgb.g, rgb.b);
 }
 
@@ -525,7 +543,7 @@ static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
 // Union Jack on a -128..127 grid: red cross with white edges over red-on-white
 // diagonals over blue.
 static hsv_t union_jack(int16_t fx, int16_t fy) {
-    const hsv_t red = {249, 255, 255}, white = {0, 0, 255}, blue = {162, 255, 190};
+    const hsv_t red = {0, 255, 255}, white = {0, 0, 255}, blue = {162, 255, 190};
     int16_t     ax = abs(fx), ay = abs(fy);
     if (ax < 14 || ay < 26) return red;
     if (ax < 24 || ay < 44) return white;
@@ -537,31 +555,35 @@ static hsv_t union_jack(int16_t fx, int16_t fy) {
 
 static void draw_flag(uint8_t led_min, uint8_t led_max) {
     if (!flag_shown) return;
-    uint32_t t = timer_elapsed32(flag_at);
-    if (t > FLAG_SHOW_MS + FLAG_FADE_MS) {
+    uint32_t t    = timer_elapsed32(flag_at);
+    uint32_t show = flag_shown == FLAG_TEST ? FLAG_TEST_MS : FLAG_SHOW_MS;
+    if (t > show + FLAG_FADE_MS) {
         flag_shown = FLAG_NONE;
         return;
     }
-    uint8_t fade = t < FLAG_SHOW_MS ? 255 : fade_out(t - FLAG_SHOW_MS, FLAG_FADE_MS);
+    uint8_t fade = t < show ? 255 : fade_out(t - show, FLAG_FADE_MS);
 
+    const hsv_t white = {0, 0, 255}, red = {0, 255, 255}, blue = {150, 255, 255}, yellow = {40, 255, 255};
     for (uint8_t i = led_min; i < led_max; i++) {
         uint8_t x   = g_led_config.point[i].x;
         uint8_t y   = g_led_config.point[i].y;
         bool    top = y < 32; // rows 0-2 of 6
+        uint8_t flag = flag_shown == FLAG_TEST ? (x < 112 ? FLAG_POLISH : FLAG_UKRAINIAN) : flag_shown;
         hsv_t   c;
-        switch (flag_shown) {
+        switch (flag) {
             case FLAG_POLISH:
-                c = top ? (hsv_t){0, 0, 255} : (hsv_t){249, 255, 255};
+                c = top ? white : red;
                 break;
             case FLAG_UKRAINIAN:
-                c = top ? (hsv_t){150, 255, 255} : (hsv_t){36, 255, 255};
+                c = top ? blue : yellow;
                 break;
             default:
                 c = union_jack((int16_t)x * 255 / 224 - 128, (int16_t)y * 255 / 64 - 128);
                 break;
         }
-        // A ripple travels left to right, as if the flag were waving.
-        uint8_t wave = 175 + scale8(sin8(x * 2 - t / 3), 80);
+        // A ripple travels left to right, as if the flag were waving. The test
+        // view holds still so colours can be judged.
+        uint8_t wave = flag_shown == FLAG_TEST ? 255 : 175 + scale8(sin8(x * 2 - t / 3), 80);
         paint(i, c.h, c.s, scale8(scale8(c.v, wave), fade));
     }
 }

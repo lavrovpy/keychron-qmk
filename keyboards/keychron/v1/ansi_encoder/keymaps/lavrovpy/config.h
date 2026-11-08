@@ -16,6 +16,10 @@
 #define RGB_MATRIX_DEFAULT_HUE 0
 #define RGB_MATRIX_DEFAULT_SPD 128
 
+// Green and blue gains out of 255; see white_balance.h.
+#define WHITE_BALANCE_G 150
+#define WHITE_BALANCE_B 140
+
 // Must match Karabiner's hyper rule (basic.to_delayed_action_delay_milliseconds),
 // or the "recording" animation will disagree with Wispr Flow's push-to-talk.
 #define HYPER_DOUBLE_TAP_MS 400

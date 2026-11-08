@@ -35,4 +35,12 @@ previous firmware to `backups/`; `keychron_v1_ansi_encoder_keychron.bin` is stoc
 ## Host signal protocol
 
 32-byte raw HID output report to usage page `0xFF60`, usage `0x61`:
-`[0x07, 0x00, 0x4C, signal]`, where signal is 1 done, 2 attention, 3 error, 4 clear.
+`[0x07, 0x00, 0x4C, signal, args...]`, where signal is 1 done, 2 attention, 3 error, 4 clear,
+5 white balance (args: green gain, blue gain), 6 flag test.
+
+## Colour balance
+
+Keychron drives the red LEDs at about half the current of green and blue, so the firmware scales
+green and blue down (`WHITE_BALANCE_G` / `_B` in `config.h`). To retune: `kbsignal flags` shows the
+Polish and Ukrainian flags side by side for 20 s, `kbsignal wb GREEN BLUE` changes the gains live
+until the board is unplugged; put the values that look right into `config.h`.

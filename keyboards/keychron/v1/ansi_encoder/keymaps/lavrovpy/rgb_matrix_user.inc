@@ -6,6 +6,7 @@ RGB_MATRIX_EFFECT(MOOD)
 #ifdef RGB_MATRIX_CUSTOM_EFFECT_IMPLS
 #    include "keyboard.h"
 #    include "wpm.h"
+#    include "white_balance.h"
 
 #    define MOOD_IDLE_DIM_MS (10UL * 60 * 1000)
 #    define MOOD_SPARKLE_MS 450
@@ -62,7 +63,7 @@ static bool MOOD(effect_params_t *params) {
         }
 #    endif
 
-        rgb_t rgb = hsv_to_rgb((hsv_t){hue, sat, val});
+        rgb_t rgb = white_balance(hsv_to_rgb((hsv_t){hue, sat, val}));
         rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     }
     return rgb_matrix_check_finished_leds(led_max);
