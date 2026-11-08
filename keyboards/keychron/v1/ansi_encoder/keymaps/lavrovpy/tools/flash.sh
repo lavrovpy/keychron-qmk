@@ -12,6 +12,12 @@ reset=0
 if [[ "${1:-}" == "--reset" ]]; then reset=1; shift; fi
 bin=${1:?usage: flash.sh [--reset] firmware.bin}
 dfu_id=0483:df11
+
+# Snapshot the firmware now: a rebuild while this waits would otherwise be
+# flashed half-written.
+snapshot="$(mktemp -t v1-firmware)"
+cp "$bin" "$snapshot"
+trap 'rm -f "$snapshot"' EXIT
 backup_dir="$(cd "$(dirname "$0")" && pwd)/../backups"
 
 echo "Waiting for the keyboard in bootloader mode..."
@@ -31,8 +37,8 @@ else
 fi
 
 if (( reset )); then
-    dfu-util -a 0 -d "$dfu_id" -s 0x08000000:mass-erase:force:leave -D "$bin"
+    dfu-util -a 0 -d "$dfu_id" -s 0x08000000:mass-erase:force:leave -D "$snapshot"
 else
-    dfu-util -a 0 -d "$dfu_id" -s 0x08000000:leave -D "$bin"
+    dfu-util -a 0 -d "$dfu_id" -s 0x08000000:leave -D "$snapshot"
 fi
 echo "Flashed $bin"

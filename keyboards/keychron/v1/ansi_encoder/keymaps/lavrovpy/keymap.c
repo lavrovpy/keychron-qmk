@@ -81,6 +81,15 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #define SENT_FLASH_MS 450
 #define RAGE_FULL 16
 #define RAGE_FADE_MS 500
+// The board can't read the Mac's volume, so it counts knob clicks: macOS moves
+// volume in 1/16 steps per key press. Turning fully down or up re-aligns the
+// count after volume was changed elsewhere (menu bar, AirPods).
+#define VOLUME_STEPS 16
+#define VOLUME_SHOW_MS 1500
+#define VOLUME_FADE_MS 300
+#define VOLUME_SLIDE_MS 150
+#define FLAG_SHOW_MS 2500
+#define FLAG_FADE_MS 500
 #define SIGNAL_DONE_MS 1400
 #define SIGNAL_ERROR_MS 900
 #define SIGNAL_ATTENTION_MAX_MS 60000
@@ -119,6 +128,29 @@ static uint8_t  rage_fade_from;
 static uint32_t rage_fade_at;
 static uint8_t  signal_kind;
 static uint32_t signal_at;
+enum flag { FLAG_NONE, FLAG_ENGLISH, FLAG_UKRAINIAN, FLAG_POLISH };
+static uint8_t  flag_shown;
+static uint32_t flag_at;
+static uint8_t  volume_level = VOLUME_STEPS / 2;
+static uint16_t volume_slide_from = VOLUME_STEPS / 2 * 256; // in 1/256 steps
+static uint32_t volume_changed_at;
+static bool     volume_muted;
+
+// Meter position in 1/256 steps, sliding towards volume_level after a change.
+static uint16_t volume_position(void) {
+    uint16_t target = volume_level * 256;
+    if (!volume_changed_at) return target;
+    uint32_t t = timer_elapsed32(volume_changed_at);
+    if (t >= VOLUME_SLIDE_MS) return target;
+    return volume_slide_from + ((int32_t)target - volume_slide_from) * (int32_t)t / VOLUME_SLIDE_MS;
+}
+
+static void volume_changed(int8_t delta) {
+    volume_slide_from = volume_position();
+    if (delta > 0 && volume_level < VOLUME_STEPS) volume_level++;
+    if (delta < 0 && volume_level > 0) volume_level--;
+    volume_changed_at = stamp();
+}
 
 static void record_bounce(uint8_t row, uint8_t col) {
     if (bounce_count[row][col] < UINT16_MAX) bounce_count[row][col]++;
@@ -219,6 +251,21 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
     if (!pressed) return true;
     key_since_caps = true;
+
+    // Hyper+I/U/P switch the input source in Karabiner; show that language's flag.
+    if (caps_down_at && !recording && (keycode == KC_I || keycode == KC_U || keycode == KC_P)) {
+        flag_shown = keycode == KC_I ? FLAG_ENGLISH : keycode == KC_U ? FLAG_UKRAINIAN : FLAG_POLISH;
+        flag_at    = stamp();
+    }
+
+    // Knob and the F11/F12 media keys alike; macOS unmutes on any volume change.
+    if (keycode == KC_VOLU || keycode == KC_VOLD) {
+        volume_muted = false;
+        volume_changed(keycode == KC_VOLU ? 1 : -1);
+    } else if (keycode == KC_MUTE) {
+        volume_muted = !volume_muted;
+        volume_changed(0);
+    }
 
     if (keycode == KC_BSPC) {
         if (rage_count < UINT8_MAX) rage_count++;
@@ -376,6 +423,41 @@ static void draw_shockwave(uint8_t led_min, uint8_t led_max) {
     }
 }
 
+// Distance from the knob corner along a 45° diagonal, in hundredths of a key.
+// LED x spans 224 units over ~15.5 keys and y spans 64 over 5 rows.
+static uint16_t knob_distance(uint8_t led) {
+    return (224 - g_led_config.point[led].x) * 100 / 145 + g_led_config.point[led].y * 100 / 128;
+}
+
+static void draw_volume(uint8_t led_min, uint8_t led_max) {
+    if (!volume_changed_at) return;
+    uint32_t t = timer_elapsed32(volume_changed_at);
+    if (t > VOLUME_SHOW_MS + VOLUME_FADE_MS) {
+        volume_changed_at = 0;
+        return;
+    }
+    uint8_t fade = t < VOLUME_SHOW_MS ? 255 : fade_out(t - VOLUME_SHOW_MS, VOLUME_FADE_MS);
+
+    static uint16_t far_end = 0; // distance of the bottom-left key: 100% volume
+    if (!far_end) {
+        for (uint8_t i = 0; i < RGB_MATRIX_LED_COUNT; i++) far_end = MAX(far_end, knob_distance(i));
+    }
+    uint16_t front = (uint32_t)volume_position() * far_end / (VOLUME_STEPS * 256);
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        uint16_t d = knob_distance(i);
+        if (volume_muted) {
+            paint(i, 0, 255, d < 130 ? fade : 0);
+            continue;
+        }
+        // Lit keys run green at the knob to red at full volume; the key the
+        // front is crossing is lit partially, so the wave slides between steps.
+        uint8_t level = d <= front ? 255 : d < front + 80 ? 255 - (d - front) * 255 / 80 : 0;
+        uint8_t hue   = 85 - (uint32_t)85 * d / far_end;
+        paint(i, hue, 255, scale8(level, fade));
+    }
+}
+
 static void draw_fn_legend(uint8_t led_min, uint8_t led_max) {
     uint8_t layer = get_highest_layer(layer_state);
     if (layer != MAC_FN && layer != WIN_FN) return;
@@ -440,6 +522,50 @@ static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
     })
 }
 
+// Union Jack on a -128..127 grid: red cross with white edges over red-on-white
+// diagonals over blue.
+static hsv_t union_jack(int16_t fx, int16_t fy) {
+    const hsv_t red = {249, 255, 255}, white = {0, 0, 255}, blue = {162, 255, 190};
+    int16_t     ax = abs(fx), ay = abs(fy);
+    if (ax < 14 || ay < 26) return red;
+    if (ax < 24 || ay < 44) return white;
+    int16_t diag = MIN(abs(fx - fy), abs(fx + fy));
+    if (diag < 14) return red;
+    if (diag < 34) return white;
+    return blue;
+}
+
+static void draw_flag(uint8_t led_min, uint8_t led_max) {
+    if (!flag_shown) return;
+    uint32_t t = timer_elapsed32(flag_at);
+    if (t > FLAG_SHOW_MS + FLAG_FADE_MS) {
+        flag_shown = FLAG_NONE;
+        return;
+    }
+    uint8_t fade = t < FLAG_SHOW_MS ? 255 : fade_out(t - FLAG_SHOW_MS, FLAG_FADE_MS);
+
+    for (uint8_t i = led_min; i < led_max; i++) {
+        uint8_t x   = g_led_config.point[i].x;
+        uint8_t y   = g_led_config.point[i].y;
+        bool    top = y < 32; // rows 0-2 of 6
+        hsv_t   c;
+        switch (flag_shown) {
+            case FLAG_POLISH:
+                c = top ? (hsv_t){0, 0, 255} : (hsv_t){249, 255, 255};
+                break;
+            case FLAG_UKRAINIAN:
+                c = top ? (hsv_t){150, 255, 255} : (hsv_t){36, 255, 255};
+                break;
+            default:
+                c = union_jack((int16_t)x * 255 / 224 - 128, (int16_t)y * 255 / 64 - 128);
+                break;
+        }
+        // A ripple travels left to right, as if the flag were waving.
+        uint8_t wave = 175 + scale8(sin8(x * 2 - t / 3), 80);
+        paint(i, c.h, c.s, scale8(scale8(c.v, wave), fade));
+    }
+}
+
 static void draw_recording(uint8_t led_min, uint8_t led_max) {
     if (recording) {
         // "On air" light while Wispr Flow is listening: the board goes dark
@@ -489,7 +615,9 @@ bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
     draw_rage(led_min, led_max);
     draw_shockwave(led_min, led_max);
     draw_fn_legend(led_min, led_max);
+    draw_volume(led_min, led_max);
     draw_hyper_sheet(led_min, led_max);
+    draw_flag(led_min, led_max);
     draw_recording(led_min, led_max);
     draw_bounces(led_min, led_max);
     draw_boot_progress(led_min, led_max);
