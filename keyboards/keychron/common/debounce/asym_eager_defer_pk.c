@@ -24,8 +24,11 @@ When no state changes have occured for DEBOUNCE milliseconds, we push the state.
 */
 
 #include "debounce.h"
+#include "keychron_debounce.h"
 #include "timer.h"
 #include <stdlib.h>
+
+__attribute__((weak)) void debounce_bounce_caught(uint8_t row, uint8_t col, debounce_bounce_kind_t kind) {}
 
 #ifdef PROTOCOL_CHIBIOS
 #    if CH_CFG_USE_MEMCORE == FALSE
@@ -157,11 +160,14 @@ static void transfer_matrix_values(matrix_row_t raw[], matrix_row_t cooked[], ui
                         cooked[row] ^= col_mask;
                         cooked_changed = true;
                     }
+                } else if (debounce_pointer->pressed) {
+                    debounce_bounce_caught(row, col, DEBOUNCE_BOUNCE_OPEN_DURING_PRESS);
                 }
             } else if (debounce_pointer->time != DEBOUNCE_ELAPSED) {
                 if (!debounce_pointer->pressed) {
                     // key-up: defer
                     debounce_pointer->time = DEBOUNCE_ELAPSED;
+                    debounce_bounce_caught(row, col, DEBOUNCE_BOUNCE_RELEASE_CANCELLED);
                 }
             }
             debounce_pointer++;

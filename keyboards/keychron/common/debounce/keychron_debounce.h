@@ -54,3 +54,14 @@ void debounce_config_reset(void);
 
 void debounce_free(void);
 void debounce_rx(uint8_t *data, uint8_t length);
+
+typedef enum {
+    // Contact opened while the press lockout was running. A real tap shorter
+    // than the lockout looks the same, so callers must confirm it.
+    DEBOUNCE_BOUNCE_OPEN_DURING_PRESS,
+    // Contact closed again before a deferred release was sent: a bounce.
+    DEBOUNCE_BOUNCE_RELEASE_CANCELLED,
+} debounce_bounce_kind_t;
+
+// Only the asym_eager_defer_pk algorithm reports bounces.
+void debounce_bounce_caught(uint8_t row, uint8_t col, debounce_bounce_kind_t kind);
