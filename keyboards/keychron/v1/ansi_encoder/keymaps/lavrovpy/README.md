@@ -7,7 +7,7 @@ Stock Keychron layout and features (VIA, Keychron Launcher), plus:
 | Nothing | The board is dark by default, so only the effects below light it. Fn+Q / Fn+A step through effects, including Mood. |
 | Type (Mood effect) | Aurora that follows typing speed: cyan when idle, through blue and magenta to red at ~120 WPM; bottom rows flicker above 90 WPM. Each press leaves a white spark. Dims after 10 min idle. |
 | A switch bounces | The debounce filter swallows it and that key strobes red. **Fn+B** types how many bounces each key has had since plug-in. |
-| Hold Caps (Hyper) 0.3 s | Cheat sheet for the Karabiner Hyper bindings: H/J/K/L white, F/B cyan, Backspace orange, I/U/P in English/Ukrainian/Polish flag colours. |
+| Hold Caps (Hyper) 0.3 s | Cheat sheet for the Karabiner Hyper bindings: H/J/K/L white (arrows), F/B cyan (page down/up), Backspace orange (forward delete), N blue (Night Shift), I/U/P in English/Ukrainian/Polish flag colours. |
 | Hyper+I / U / P (switch language) | The language's flag waves across the board for 2.5 s: Union Jack, Ukraine (blue over yellow), Poland (white over red). |
 | Double-tap and hold Caps (Wispr Flow) | "On air" light while you talk: the board goes dark except Caps, PgUp, PgDn and Home in solid red; green flash on release. |
 | Turn the knob (or F11/F12, or press it to mute) | Volume meter for 1.5 s: lights fill from the knob corner diagonally towards the bottom-left, one step per click, green to red. Muted shows only the corner in red. The board counts clicks (macOS has 16 volume steps) rather than reading the Mac's volume; turning fully down or up re-aligns it. |

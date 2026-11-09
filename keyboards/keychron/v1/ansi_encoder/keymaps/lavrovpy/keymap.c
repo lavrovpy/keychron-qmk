@@ -498,7 +498,7 @@ static void draw_fn_legend(uint8_t led_min, uint8_t led_max) {
 }
 
 // Karabiner's Hyper bindings: H/J/K/L arrows, F/B page down/up, Backspace
-// forward delete, I/U/P English/Ukrainian/Polish. Update together with
+// forward delete, I/U/P English/Ukrainian/Polish, N Night Shift. Update together with
 // ~/.config/karabiner/karabiner.json.
 static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
     if (!caps_down_at || recording || timer_elapsed32(caps_down_at) < HYPER_SHEET_DELAY_MS) return;
@@ -511,7 +511,7 @@ static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
             case KC_J:
             case KC_K:
             case KC_L:
-                paint(led, 0, 0, 255);
+                paint(led, 0, 0, 150);
                 break;
             case KC_F:
             case KC_B:
@@ -519,6 +519,9 @@ static void draw_hyper_sheet(uint8_t led_min, uint8_t led_max) {
                 break;
             case KC_BSPC:
                 paint(led, 20, 255, 255);
+                break;
+            case KC_N: // night sky
+                paint(led, 170, 255, 220);
                 break;
             case KC_I: { // red, white, blue
                 uint8_t step = (now / 400) % 3;
