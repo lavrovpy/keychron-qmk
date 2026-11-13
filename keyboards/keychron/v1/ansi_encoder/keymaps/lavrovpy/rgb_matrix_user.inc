@@ -1,5 +1,6 @@
-// "Dark": the default. Nothing lit, so only the overlays in keymap.c show.
-RGB_MATRIX_EFFECT(DARK)
+// "Dim": the default. A very dim white under the overlays in keymap.c. It has
+// no motion, so the speed setting (Fn+T / Fn+G) sets its level; 0 is dark.
+RGB_MATRIX_EFFECT(DIM)
 
 // "Mood": a slow aurora whose colour and speed follow typing speed.
 // Idle is cyan; it moves through blue and magenta to red at ~120 WPM,
@@ -15,9 +16,11 @@ RGB_MATRIX_EFFECT(MOOD)
 #    define MOOD_SPARKLE_MS 450
 #    define MOOD_SPARKLE_RADIUS 26
 
-static bool DARK(effect_params_t *params) {
+static bool DIM(effect_params_t *params) {
     RGB_MATRIX_USE_LIMITS(led_min, led_max);
-    for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, 0, 0, 0);
+    uint8_t level = scale8(scale8(rgb_matrix_config.speed, DIM_WHITE_MAX), rgb_matrix_config.hsv.v);
+    rgb_t   rgb   = white_balance((rgb_t){.r = level, .g = level, .b = level});
+    for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
     return rgb_matrix_check_finished_leds(led_max);
 }
 

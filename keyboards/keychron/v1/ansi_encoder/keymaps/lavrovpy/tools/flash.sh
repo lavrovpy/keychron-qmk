@@ -6,6 +6,7 @@
 # --reset also wipes the stored settings (keymap, lighting, debounce) so the
 # firmware's defaults apply; needed when coming from a different firmware.
 # Each run first saves the whole flash, including settings, to backups/.
+# After flashing it resets the key layout saved on the board to keymap.c.
 set -euo pipefail
 
 reset=0
@@ -42,3 +43,20 @@ else
     dfu-util -a 0 -d "$dfu_id" -s 0x08000000:leave -D "$snapshot"
 fi
 echo "Flashed $bin"
+
+# VIA keeps the key layout in the stored settings and refreshes it from the
+# firmware only when the build date changes, so a same-day reflash would ignore
+# keymap.c edits. --reset has already wiped it.
+if (( ! reset )); then
+    kbsignal="$(command -v kbsignal || echo "$HOME/.local/bin/kbsignal")"
+    for _ in $(seq 1 15); do
+        sleep 1
+        # kbsignal prints nothing while the board is still starting up.
+        if out="$("$kbsignal" keymap-reset 2>/dev/null)" && [[ -n "$out" ]]; then
+            echo "$out"
+            exit 0
+        fi
+    done
+    echo "Could not reset the saved key layout; run: kbsignal keymap-reset" >&2
+    exit 1
+fi

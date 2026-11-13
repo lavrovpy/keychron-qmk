@@ -10,12 +10,14 @@
 #define DEFAULT_DEBOUNCE_TYPE DEBOUNCE_ASYM_EAGER_DEFER_PER_KEY
 
 #define RGB_MATRIX_DEFAULT_ON true
-// Dark rather than off: switching the matrix off would also hide the overlays.
-#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_DARK
+// Dim rather than off: switching the matrix off would also hide the overlays.
+#define RGB_MATRIX_DEFAULT_MODE RGB_MATRIX_CUSTOM_DIM
 #define RGB_MATRIX_DEFAULT_VAL RGB_MATRIX_MAXIMUM_BRIGHTNESS
 #define RGB_MATRIX_DEFAULT_SAT 255
 #define RGB_MATRIX_DEFAULT_HUE 0
-#define RGB_MATRIX_DEFAULT_SPD 128
+#define RGB_MATRIX_DEFAULT_SPD 80
+// The Dim effect's white level is speed setting x this / 255, so 30 by default.
+#define DIM_WHITE_MAX 96
 
 // Green and blue gains out of 255; see white_balance.h.
 #define WHITE_BALANCE_G 150

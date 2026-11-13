@@ -5,6 +5,7 @@
  */
 
 #include QMK_KEYBOARD_H
+#include <string.h>
 #include "keychron_common.h"
 #include "keychron_debounce.h"
 #include "via.h"
@@ -27,6 +28,8 @@ enum layers {
 enum user_keycodes {
     BOUNCE_RPT = QK_USER_0, // types how many bounces each key has had since plug-in
     BOOT_HOLD,              // hold 2 s to enter the bootloader for flashing
+    SNAKE_GAME,             // starts or quits Snake
+    BLOCKS_GAME,            // starts or quits Blocks
 };
 
 // clang-format off
@@ -44,7 +47,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,            _______,
         UG_TOGG,  UG_NEXT,  UG_VALU,  UG_HUEU,  UG_SATU,  UG_SPDU,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,            _______,
         _______,  UG_PREV,  UG_VALD,  UG_HUED,  UG_SATD,  UG_SPDD,  _______,  _______,  _______,  _______,  _______,  _______,            _______,            _______,
-        _______,            _______,  _______,  _______,  _______,  BOUNCE_RPT,_______, _______,  _______,  _______,  _______,            _______,  _______,
+        _______,            _______,  _______,  _______,  _______,  BOUNCE_RPT,SNAKE_GAME,BLOCKS_GAME,_______,  _______,  _______,            _______,  _______,
         _______,  _______,  _______,                                _______,                                _______,  _______,  _______,  _______,  _______,  _______),
 
     [WIN_BASE] = LAYOUT_ansi_82(
@@ -60,7 +63,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,            _______,
         UG_TOGG,  UG_NEXT,  UG_VALU,  UG_HUEU,  UG_SATU,  UG_SPDU,  _______,  _______,  _______,  _______,  _______,  _______,  _______,  _______,            _______,
         _______,  UG_PREV,  UG_VALD,  UG_HUED,  UG_SATD,  UG_SPDD,  _______,  _______,  _______,  _______,  _______,  _______,            _______,            _______,
-        _______,            _______,  _______,  _______,  _______,  BOUNCE_RPT,_______, _______,  _______,  _______,  _______,            _______,  _______,
+        _______,            _______,  _______,  _______,  _______,  BOUNCE_RPT,SNAKE_GAME,BLOCKS_GAME,_______,  _______,  _______,            _______,  _______,
         _______,  _______,  _______,                                _______,                                _______,  _______,  _______,  _______,  _______,  _______),
 };
 
@@ -97,6 +100,9 @@ const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][NUM_DIRECTIONS] = {
 #define SIGNAL_DONE_MS 1400
 #define SIGNAL_ERROR_MS 900
 #define SIGNAL_ATTENTION_MAX_MS 60000
+#define DOOM_STROBE_MS 700
+#define DOOM_FADE_FROM_MS 6000
+#define DOOM_MS 7000
 
 // Host signals arrive as VIA "custom set value" on the custom channel:
 // [0x07, 0x00, SIGNAL_MAGIC, signal, args...]. The magic keeps them apart from
@@ -109,6 +115,7 @@ enum host_signal {
     SIGNAL_CLEAR         = 4,
     SIGNAL_WHITE_BALANCE = 5, // args: green gain, blue gain
     SIGNAL_FLAG_TEST     = 6, // Polish and Ukrainian flags side by side
+    SIGNAL_DOOM          = 7, // hell mode; the board also plays it on "wtf?" + Enter
 };
 #define FLAG_TEST_MS 20000
 
@@ -221,6 +228,449 @@ static void send_bounce_report(void) {
     if (!any) send_string(" none");
 }
 
+// --- "wtf?" + Enter -----------------------------------------------------------
+// Matches physical keys: the input source is applied later, on the Mac, so the
+// same keys typed on the Ukrainian layout ("цеа?") match too.
+
+enum wtf_token { WTF_OTHER, WTF_W, WTF_T, WTF_F, WTF_QUESTION, WTF_LETTER };
+static uint8_t wtf_typed[5]; // the last five keys, newest last
+
+static bool wtf_watch(uint16_t keycode) {
+    if (IS_MODIFIER_KEYCODE(keycode)) return false;
+    uint8_t mods = get_mods() | get_oneshot_mods();
+    if (keycode == KC_BSPC) {
+        memmove(wtf_typed + 1, wtf_typed, sizeof(wtf_typed) - 1);
+        wtf_typed[0] = WTF_OTHER;
+        return false;
+    }
+    if (keycode == KC_ENT && !(mods & MOD_MASK_SHIFT)) { // Shift+Enter is a newline in chats
+        bool hit = wtf_typed[0] != WTF_LETTER && wtf_typed[1] == WTF_W && wtf_typed[2] == WTF_T && wtf_typed[3] == WTF_F && wtf_typed[4] == WTF_QUESTION;
+        memset(wtf_typed, WTF_OTHER, sizeof(wtf_typed));
+        return hit;
+    }
+    uint8_t token = WTF_OTHER;
+    if (!caps_down_at && !(mods & (MOD_MASK_CTRL | MOD_MASK_ALT | MOD_MASK_GUI))) { // not shortcuts or Hyper
+        if (keycode == KC_W) token = WTF_W;
+        else if (keycode == KC_T) token = WTF_T;
+        else if (keycode == KC_F) token = WTF_F;
+        else if (keycode >= KC_A && keycode <= KC_Z) token = WTF_LETTER;
+        else if (keycode == KC_SLSH && (mods & MOD_MASK_SHIFT)) token = WTF_QUESTION;
+    }
+    memmove(wtf_typed, wtf_typed + 1, sizeof(wtf_typed) - 1);
+    wtf_typed[sizeof(wtf_typed) - 1] = token;
+    return false;
+}
+
+// --- Games --------------------------------------------------------------------
+// A running game owns the lights and the key presses (see process_record_user).
+// When it ends the board blinks red, then shows the score on the number row
+// until a key is pressed or the time runs out.
+
+#define GAME_OVER_BLINK_MS 1200
+#define GAME_SCORE_MS 6000
+
+// --- Snake (Fn+N) --------------------------------------------------------------
+// The field is the keys themselves: a cell is a key with an LED, so wide keys
+// make their row shorter. Left/right go to the next key in the row; up/down go
+// to the key in the next row nearest to the column where the vertical run
+// began. All four edges wrap, so only the snake's own body is fatal.
+
+#define SNAKE_START_LEN 3
+#define SNAKE_STEP_MS 240
+#define SNAKE_STEP_MIN_MS 120
+#define SNAKE_SPEEDUP_MS 4 // per food eaten
+#define SNAKE_LIVE_LENGTH_LEVEL 140 // brightness of the length readout during play
+
+enum snake_phase { SNAKE_OFF, SNAKE_PLAYING, SNAKE_PAUSED, SNAKE_OVER };
+enum snake_dir { SNAKE_RIGHT, SNAKE_DOWN, SNAKE_LEFT, SNAKE_UP }; // opposite is dir ^ 2
+
+_Static_assert(MATRIX_ROWS <= 16 && MATRIX_COLS <= 16, "a snake cell packs row and column into one byte");
+#define SNAKE_CELL(row, col) ((row) << 4 | (col))
+#define SNAKE_ROW(cell) ((cell) >> 4)
+#define SNAKE_COL(cell) ((cell)&15)
+
+static uint8_t  snake_phase;
+static uint32_t snake_phase_at;
+static uint32_t snake_step_at;
+static uint8_t  snake_body[MATRIX_ROWS * MATRIX_COLS]; // cells, head first
+static uint8_t  snake_len;
+static uint8_t  snake_dir;
+static uint8_t  snake_turns[2]; // queued, so two quick turns both register
+static uint8_t  snake_turn_count;
+static uint8_t  snake_column_x;
+static uint8_t  snake_food;
+
+static uint8_t snake_led(uint8_t cell) {
+    return g_led_config.matrix_co[SNAKE_ROW(cell)][SNAKE_COL(cell)];
+}
+
+static bool snake_covers(uint8_t cell, uint8_t segments) {
+    for (uint8_t i = 0; i < segments; i++) {
+        if (snake_body[i] == cell) return true;
+    }
+    return false;
+}
+
+static bool snake_place_food(void) {
+    uint8_t empty[MATRIX_ROWS * MATRIX_COLS];
+    uint8_t count = 0;
+    for (uint8_t row = 0; row < MATRIX_ROWS; row++) {
+        for (uint8_t col = 0; col < MATRIX_COLS; col++) {
+            uint8_t cell = SNAKE_CELL(row, col);
+            if (snake_led(cell) != NO_LED && !snake_covers(cell, snake_len)) empty[count++] = cell;
+        }
+    }
+    if (!count) return false;
+    snake_food = empty[random8() % count];
+    return true;
+}
+
+static void snake_start(void) {
+    random16_add_entropy(timer_read());
+    // On the home row, heading right: head on D, then S and A.
+    snake_len = SNAKE_START_LEN;
+    for (uint8_t i = 0; i < SNAKE_START_LEN; i++) snake_body[i] = SNAKE_CELL(3, SNAKE_START_LEN - i);
+    snake_dir        = SNAKE_RIGHT;
+    snake_turn_count = 0;
+    snake_column_x   = g_led_config.point[snake_led(snake_body[0])].x;
+    snake_place_food();
+    snake_phase    = SNAKE_PLAYING;
+    snake_phase_at = snake_step_at = timer_read32();
+}
+
+static void snake_end(void) {
+    snake_phase    = SNAKE_OVER;
+    snake_phase_at = timer_read32();
+}
+
+static void snake_step(void) {
+    if (snake_turn_count) {
+        snake_dir      = snake_turns[0];
+        snake_turns[0] = snake_turns[1];
+        snake_turn_count--;
+    }
+    uint8_t row = SNAKE_ROW(snake_body[0]);
+    uint8_t col = SNAKE_COL(snake_body[0]);
+    if (snake_dir == SNAKE_LEFT || snake_dir == SNAKE_RIGHT) {
+        do {
+            col = (col + (snake_dir == SNAKE_RIGHT ? 1 : MATRIX_COLS - 1)) % MATRIX_COLS;
+        } while (g_led_config.matrix_co[row][col] == NO_LED);
+        snake_column_x = g_led_config.point[g_led_config.matrix_co[row][col]].x;
+    } else {
+        row              = (row + (snake_dir == SNAKE_DOWN ? 1 : MATRIX_ROWS - 1)) % MATRIX_ROWS;
+        uint8_t nearest = UINT8_MAX;
+        for (uint8_t c = 0; c < MATRIX_COLS; c++) {
+            uint8_t led = g_led_config.matrix_co[row][c];
+            if (led == NO_LED) continue;
+            int16_t gap = g_led_config.point[led].x - snake_column_x;
+            if (gap < 0) gap = -gap;
+            if (gap < nearest) {
+                nearest = gap;
+                col     = c;
+            }
+        }
+    }
+    uint8_t head = SNAKE_CELL(row, col);
+    bool    ate  = head == snake_food;
+    // Unless the snake grows, its last segment moves away in this same step.
+    uint8_t staying = snake_len - (ate ? 0 : 1);
+    if (snake_covers(head, staying)) {
+        snake_end();
+        return;
+    }
+    memmove(snake_body + 1, snake_body, staying);
+    snake_body[0] = head;
+    if (ate) {
+        snake_len++;
+        if (!snake_place_food()) snake_end(); // every key is snake
+    }
+}
+
+static void snake_turn(uint8_t dir) {
+    uint8_t last = snake_turn_count ? snake_turns[snake_turn_count - 1] : snake_dir;
+    if (dir == last || dir == (last ^ 2) || snake_turn_count == ARRAY_SIZE(snake_turns)) return;
+    snake_turns[snake_turn_count++] = dir;
+}
+
+static void snake_key(uint16_t keycode) {
+    if (snake_phase == SNAKE_OVER) {
+        if (timer_elapsed32(snake_phase_at) < GAME_OVER_BLINK_MS) return;
+        if (keycode == KC_SPC) {
+            snake_start();
+        } else {
+            snake_phase = SNAKE_OFF;
+        }
+        return;
+    }
+    switch (keycode) {
+        case KC_ESC:
+            snake_phase = SNAKE_OFF;
+            break;
+        case KC_SPC:
+            snake_phase   = snake_phase == SNAKE_PAUSED ? SNAKE_PLAYING : SNAKE_PAUSED;
+            snake_step_at = timer_read32();
+            break;
+        case KC_H:
+        case KC_A:
+        case KC_LEFT:
+            snake_turn(SNAKE_LEFT);
+            break;
+        case KC_J:
+        case KC_S:
+        case KC_DOWN:
+            snake_turn(SNAKE_DOWN);
+            break;
+        case KC_K:
+        case KC_W:
+        case KC_UP:
+            snake_turn(SNAKE_UP);
+            break;
+        case KC_L:
+        case KC_D:
+        case KC_RGHT:
+            snake_turn(SNAKE_RIGHT);
+            break;
+    }
+}
+
+static void snake_task(void) {
+    if (snake_phase == SNAKE_PLAYING) {
+        uint16_t faster = (snake_len - SNAKE_START_LEN) * SNAKE_SPEEDUP_MS;
+        uint16_t step   = SNAKE_STEP_MS - MIN(faster, SNAKE_STEP_MS - SNAKE_STEP_MIN_MS);
+        if (timer_elapsed32(snake_step_at) >= step) {
+            snake_step_at = timer_read32();
+            snake_step();
+        }
+    } else if (snake_phase == SNAKE_OVER && timer_elapsed32(snake_phase_at) > GAME_OVER_BLINK_MS + GAME_SCORE_MS) {
+        snake_phase = SNAKE_OFF;
+    }
+}
+
+// --- Blocks (Fn+M) -------------------------------------------------------------
+// A falling-blocks game in a well that lies on its side: five lanes (the key
+// rows from the F-row to the Shift row) by twelve keys deep, with the floor at
+// the left edge. Pieces enter on the right and fall left; a full column of five
+// keys clears. Cell (lane, depth) is the depth-th key of that row, so a column
+// slants the way the key columns do (F1, 1, Q, A, Z).
+
+#define BLOCKS_LANES 5
+#define BLOCKS_DEPTH 12
+#define BLOCKS_STEP_MS 600
+#define BLOCKS_STEP_MIN_MS 150
+#define BLOCKS_SPEEDUP_MS 30 // per column cleared
+#define BLOCKS_SOFT_DROP_MS 60
+#define BLOCKS_CLEAR_MS 250
+
+enum blocks_phase { BLOCKS_OFF, BLOCKS_FALLING, BLOCKS_CLEARING, BLOCKS_PAUSED, BLOCKS_OVER };
+enum blocks_kind { BLOCKS_DOT, BLOCKS_PAIR, BLOCKS_BAR, BLOCKS_CORNER, BLOCKS_KINDS };
+
+typedef struct {
+    int8_t lane, depth;
+} blocks_offset_t;
+
+static const struct {
+    uint8_t         cells;
+    blocks_offset_t at[3]; // offsets from the pivot
+    uint8_t         hue;
+} blocks_shapes[BLOCKS_KINDS] = {
+    [BLOCKS_DOT]    = {1, {{0, 0}}, 43},
+    [BLOCKS_PAIR]   = {2, {{0, 0}, {1, 0}}, 128},
+    [BLOCKS_BAR]    = {3, {{-1, 0}, {0, 0}, {1, 0}}, 213},
+    [BLOCKS_CORNER] = {3, {{0, 0}, {1, 0}, {0, -1}}, 85},
+};
+// Dots are rare because one fills any hole.
+static const uint8_t blocks_bag[] = {BLOCKS_BAR, BLOCKS_BAR, BLOCKS_BAR, BLOCKS_CORNER, BLOCKS_CORNER, BLOCKS_CORNER, BLOCKS_PAIR, BLOCKS_PAIR, BLOCKS_DOT};
+
+static uint8_t         blocks_phase;
+static uint32_t        blocks_phase_at;
+static uint32_t        blocks_step_at;
+static uint8_t         blocks_led[BLOCKS_LANES][BLOCKS_DEPTH];
+static uint8_t         blocks_well[BLOCKS_LANES][BLOCKS_DEPTH]; // 0 = empty, else kind + 1
+static uint8_t         blocks_kind;
+static blocks_offset_t blocks_piece[3]; // the falling piece's shape as rotated
+static int8_t          blocks_lane, blocks_depth; // its pivot
+static bool            blocks_dropping;
+static uint8_t         blocks_cleared; // columns cleared: the score
+
+static bool blocks_fits(int8_t lane, int8_t depth, const blocks_offset_t *piece) {
+    for (uint8_t i = 0; i < blocks_shapes[blocks_kind].cells; i++) {
+        int8_t l = lane + piece[i].lane;
+        int8_t d = depth + piece[i].depth;
+        if (l < 0 || l >= BLOCKS_LANES || d < 0) return false;
+        // Above the rim is open space.
+        if (d < BLOCKS_DEPTH && blocks_well[l][d]) return false;
+    }
+    return true;
+}
+
+static bool blocks_column_full(uint8_t depth) {
+    for (uint8_t lane = 0; lane < BLOCKS_LANES; lane++) {
+        if (!blocks_well[lane][depth]) return false;
+    }
+    return true;
+}
+
+static void blocks_end(void) {
+    blocks_phase    = BLOCKS_OVER;
+    blocks_phase_at = timer_read32();
+}
+
+static void blocks_spawn(void) {
+    blocks_kind = blocks_bag[random8() % ARRAY_SIZE(blocks_bag)];
+    memcpy(blocks_piece, blocks_shapes[blocks_kind].at, sizeof(blocks_piece));
+    blocks_lane     = BLOCKS_LANES / 2;
+    blocks_depth    = BLOCKS_DEPTH - 1;
+    blocks_dropping = false; // each piece needs its own press
+    blocks_step_at  = timer_read32();
+    blocks_phase    = BLOCKS_FALLING;
+    if (!blocks_fits(blocks_lane, blocks_depth, blocks_piece)) blocks_end();
+}
+
+static void blocks_start(void) {
+    random16_add_entropy(timer_read());
+    memset(blocks_well, 0, sizeof(blocks_well));
+    for (uint8_t lane = 0; lane < BLOCKS_LANES; lane++) {
+        uint8_t depth = 0;
+        for (uint8_t col = 0; col < MATRIX_COLS && depth < BLOCKS_DEPTH; col++) {
+            uint8_t led = g_led_config.matrix_co[lane][col];
+            if (led != NO_LED) blocks_led[lane][depth++] = led;
+        }
+    }
+    blocks_cleared  = 0;
+    blocks_phase_at = timer_read32();
+    blocks_spawn();
+}
+
+static void blocks_lock(void) {
+    for (uint8_t i = 0; i < blocks_shapes[blocks_kind].cells; i++) {
+        int8_t depth = blocks_depth + blocks_piece[i].depth;
+        if (depth >= BLOCKS_DEPTH) { // came to rest sticking out of the well
+            blocks_end();
+            return;
+        }
+        blocks_well[blocks_lane + blocks_piece[i].lane][depth] = blocks_kind + 1;
+    }
+    for (uint8_t depth = 0; depth < BLOCKS_DEPTH; depth++) {
+        if (blocks_column_full(depth)) {
+            // Flash the full columns before blocks_collapse removes them.
+            blocks_phase    = BLOCKS_CLEARING;
+            blocks_phase_at = timer_read32();
+            return;
+        }
+    }
+    blocks_spawn();
+}
+
+static void blocks_collapse(void) {
+    uint8_t to = 0;
+    for (uint8_t from = 0; from < BLOCKS_DEPTH; from++) {
+        if (blocks_column_full(from)) {
+            if (blocks_cleared < 99) blocks_cleared++;
+            continue;
+        }
+        for (uint8_t lane = 0; lane < BLOCKS_LANES; lane++) blocks_well[lane][to] = blocks_well[lane][from];
+        to++;
+    }
+    for (; to < BLOCKS_DEPTH; to++) {
+        for (uint8_t lane = 0; lane < BLOCKS_LANES; lane++) blocks_well[lane][to] = 0;
+    }
+}
+
+static void blocks_rotate(void) {
+    blocks_offset_t turned[3];
+    for (uint8_t i = 0; i < ARRAY_SIZE(turned); i++) {
+        turned[i] = (blocks_offset_t){.lane = blocks_piece[i].depth, .depth = -blocks_piece[i].lane};
+    }
+    // Against a wall or the stack, the piece may shift one lane to make room.
+    static const int8_t nudges[] = {0, 1, -1};
+    for (uint8_t i = 0; i < ARRAY_SIZE(nudges); i++) {
+        if (blocks_fits(blocks_lane + nudges[i], blocks_depth, turned)) {
+            blocks_lane += nudges[i];
+            memcpy(blocks_piece, turned, sizeof(blocks_piece));
+            return;
+        }
+    }
+}
+
+// The arrows are named for the keyboard lying flat. Turn the keyboard a quarter
+// turn anticlockwise and they still point the right way: Left is "down".
+static void blocks_key(uint16_t keycode, bool pressed) {
+    if (!pressed) {
+        if (keycode == KC_LEFT || keycode == KC_H || keycode == KC_A) blocks_dropping = false;
+        return;
+    }
+    if (blocks_phase == BLOCKS_OVER) {
+        if (timer_elapsed32(blocks_phase_at) < GAME_OVER_BLINK_MS) return;
+        if (keycode == KC_SPC) {
+            blocks_start();
+        } else {
+            blocks_phase = BLOCKS_OFF;
+        }
+        return;
+    }
+    if (keycode == KC_ESC) {
+        blocks_phase = BLOCKS_OFF;
+        return;
+    }
+    if (keycode == KC_P && blocks_phase != BLOCKS_CLEARING) {
+        blocks_phase   = blocks_phase == BLOCKS_PAUSED ? BLOCKS_FALLING : BLOCKS_PAUSED;
+        blocks_step_at = timer_read32();
+        return;
+    }
+    if (blocks_phase != BLOCKS_FALLING) return;
+    switch (keycode) {
+        case KC_UP:
+        case KC_K:
+        case KC_W:
+            if (blocks_fits(blocks_lane - 1, blocks_depth, blocks_piece)) blocks_lane--;
+            break;
+        case KC_DOWN:
+        case KC_J:
+        case KC_S:
+            if (blocks_fits(blocks_lane + 1, blocks_depth, blocks_piece)) blocks_lane++;
+            break;
+        case KC_RGHT:
+        case KC_L:
+        case KC_D:
+            blocks_rotate();
+            break;
+        case KC_LEFT:
+        case KC_H:
+        case KC_A:
+            blocks_dropping = true;
+            break;
+        case KC_SPC:
+            while (blocks_fits(blocks_lane, blocks_depth - 1, blocks_piece)) blocks_depth--;
+            blocks_lock();
+            break;
+    }
+}
+
+static void blocks_task(void) {
+    switch (blocks_phase) {
+        case BLOCKS_FALLING: {
+            uint16_t faster = blocks_cleared * BLOCKS_SPEEDUP_MS;
+            uint16_t step   = BLOCKS_STEP_MS - MIN(faster, BLOCKS_STEP_MS - BLOCKS_STEP_MIN_MS);
+            if (blocks_dropping) step = BLOCKS_SOFT_DROP_MS;
+            if (timer_elapsed32(blocks_step_at) < step) break;
+            blocks_step_at = timer_read32();
+            if (blocks_fits(blocks_lane, blocks_depth - 1, blocks_piece)) {
+                blocks_depth--;
+            } else {
+                blocks_lock();
+            }
+        } break;
+        case BLOCKS_CLEARING:
+            if (timer_elapsed32(blocks_phase_at) < BLOCKS_CLEAR_MS) break;
+            blocks_collapse();
+            blocks_spawn();
+            break;
+        case BLOCKS_OVER:
+            if (timer_elapsed32(blocks_phase_at) > GAME_OVER_BLINK_MS + GAME_SCORE_MS) blocks_phase = BLOCKS_OFF;
+            break;
+    }
+}
+
 // --- Key handling ------------------------------------------------------------
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
@@ -233,7 +683,33 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 
     if (pressed && signal_kind == SIGNAL_ATTENTION) signal_kind = 0;
 
+    // While a game runs, key presses control it instead of reaching the host.
+    // Fn and volume still work. Releases are not swallowed: a key that was held
+    // when the game started would otherwise stay held on the host.
+    bool gaming = snake_phase || blocks_phase;
+    if (gaming && keycode != SNAKE_GAME && keycode != BLOCKS_GAME && !IS_QK_MOMENTARY(keycode) && keycode != KC_VOLU && keycode != KC_VOLD && keycode != KC_MUTE) {
+        if (blocks_phase) {
+            blocks_key(keycode, pressed);
+        } else if (pressed) {
+            snake_key(keycode);
+        }
+        if (pressed) return false;
+    }
+
     switch (keycode) {
+        case SNAKE_GAME:
+        case BLOCKS_GAME:
+            if (pressed) {
+                if (gaming) {
+                    snake_phase  = SNAKE_OFF;
+                    blocks_phase = BLOCKS_OFF;
+                } else if (keycode == SNAKE_GAME) {
+                    snake_start();
+                } else {
+                    blocks_start();
+                }
+            }
+            return false;
         case BOOT_HOLD:
             boot_hold_at = pressed ? stamp() : 0;
             return false;
@@ -282,7 +758,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         rage_count     = 0;
     }
 
-    if (keycode == KC_ENT && in_grid) {
+    if (wtf_watch(keycode)) {
+        signal_kind = SIGNAL_DOOM;
+        signal_at   = stamp();
+    } else if (keycode == KC_ENT && in_grid) {
         uint8_t led = g_led_config.matrix_co[row][col];
         if (led != NO_LED) {
             shock_at      = stamp();
@@ -309,6 +788,8 @@ void keychron_task_kb(void) {
         }
     }
     if (boot_hold_at && timer_elapsed32(boot_hold_at) > BOOT_HOLD_MS) reset_keyboard();
+    snake_task();
+    blocks_task();
     if (signal_kind == SIGNAL_ATTENTION && timer_elapsed32(signal_at) > SIGNAL_ATTENTION_MAX_MS) signal_kind = 0;
 }
 
@@ -317,7 +798,7 @@ void keychron_task_kb(void) {
 void via_custom_value_command_kb(uint8_t *data, uint8_t length) {
     if (data[1] == id_custom_channel && data[2] == SIGNAL_MAGIC && length > 3) {
         uint8_t kind = data[3];
-        if (kind >= SIGNAL_DONE && kind <= SIGNAL_ERROR) {
+        if ((kind >= SIGNAL_DONE && kind <= SIGNAL_ERROR) || kind == SIGNAL_DOOM) {
             signal_kind = kind;
             signal_at   = stamp();
             return;
@@ -371,6 +852,44 @@ static uint16_t distance(uint8_t led, uint8_t x, uint8_t y) {
         }                                                                   \
     }
 
+// Hell mode: a white/red strobe, then flames rising from the bottom row under a
+// heartbeat, with W, T and F blinking; the fire dies down over the last second.
+static void draw_doom(uint32_t t, uint8_t led_min, uint8_t led_max) {
+    if (t > DOOM_MS) {
+        signal_kind = 0;
+        return;
+    }
+    if (t < DOOM_STROBE_MS) {
+        uint8_t step = (t / 80) % 3;
+        for (uint8_t i = led_min; i < led_max; i++) paint(i, 0, step == 0 ? 0 : 255, step == 2 ? 0 : 255);
+        return;
+    }
+    uint8_t beat_t = (t % 900) / 4; // two thumps per 900 ms
+    uint8_t beat   = (beat_t < 30 || (beat_t > 55 && beat_t < 85)) ? 255 : 150;
+    uint8_t dying  = t > DOOM_FADE_FROM_MS ? fade_out(t - DOOM_FADE_FROM_MS, DOOM_MS - DOOM_FADE_FROM_MS) : 255;
+    for (uint8_t i = led_min; i < led_max; i++) {
+        uint8_t x      = g_led_config.point[i].x;
+        uint8_t depth  = 64 - g_led_config.point[i].y; // 0 on the bottom row
+        uint8_t height = 22 + scale8(sin8(x * 4 + t / 5), 22) + scale8(sin8(x * 11 - t / 3), 16);
+        height         = scale8(height, dying);
+        if (depth >= height) {
+            paint(i, 0, 255, scale8(18, beat)); // embers above the flames
+            continue;
+        }
+        uint8_t heat = 255 - depth * 255 / height;
+        uint8_t sat  = heat > 225 ? 255 - (heat - 225) * 4 : 255; // white-hot at the base
+        uint8_t val  = scale8(scale8(heat, 200 + random8() % 56), beat);
+        paint(i, heat / 8, sat, val);
+    }
+    if (dying < 255) return;
+    bool    white = (t / 125) % 2;
+    uint8_t layer = get_highest_layer(default_layer_state);
+    FOR_EACH_KEY_LED({
+        uint16_t kc = keymap_key_to_keycode(layer, (keypos_t){.row = row, .col = col});
+        if (kc == KC_W || kc == KC_T || kc == KC_F) paint(led, 0, white ? 0 : 255, 255);
+    })
+}
+
 static void draw_host_signal(uint8_t led_min, uint8_t led_max) {
     if (!signal_kind) return;
     uint32_t t = timer_elapsed32(signal_at);
@@ -399,6 +918,9 @@ static void draw_host_signal(uint8_t led_min, uint8_t led_max) {
             bool on = (t / 150) % 2 == 0 && t < 600;
             for (uint8_t i = led_min; i < led_max; i++) paint(i, 0, 255, on ? 255 : 0);
         } break;
+        case SIGNAL_DOOM:
+            draw_doom(t, led_min, led_max);
+            break;
     }
 }
 
@@ -631,9 +1153,108 @@ static void draw_boot_progress(uint8_t led_min, uint8_t led_max) {
     }
 }
 
+static void paint_key(uint8_t row, uint8_t col, uint8_t led_min, uint8_t led_max, uint8_t h, uint8_t s, uint8_t v) {
+    uint8_t led = g_led_config.matrix_co[row][col];
+    if (led >= led_min && led < led_max) paint(led, h, s, v);
+}
+
+// A game's score on the number row: tens digit in blue, ones digit in white.
+// When both digits are the same key, it alternates between the colours.
+static void draw_game_number(uint8_t n, uint8_t led_min, uint8_t led_max, uint8_t level) {
+    uint8_t tens = n / 10 % 10, ones = n % 10;
+    bool    shared = tens && tens == ones;
+    bool    blue   = (timer_read32() / 400) % 2;
+    if (tens && (!shared || blue)) paint_key(1, tens, led_min, led_max, 170, 255, level);
+    if (!shared || !blue) paint_key(1, ones ? ones : 10, led_min, led_max, 0, 0, level);
+}
+
+static void snake_paint(uint8_t cell, uint8_t led_min, uint8_t led_max, uint8_t h, uint8_t s, uint8_t v) {
+    paint_key(SNAKE_ROW(cell), SNAKE_COL(cell), led_min, led_max, h, s, v);
+}
+
+// Returns true while the game owns the board.
+static bool draw_snake(uint8_t led_min, uint8_t led_max) {
+    if (!snake_phase) return false;
+    for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, 0, 0, 0);
+    uint32_t t = timer_elapsed32(snake_phase_at);
+
+    if (snake_phase == SNAKE_OVER && t > GAME_OVER_BLINK_MS) {
+        draw_game_number(snake_len, led_min, led_max, 255);
+        return true;
+    }
+    // Under the snake and the food, which may cross the number row.
+    draw_game_number(snake_len, led_min, led_max, SNAKE_LIVE_LENGTH_LEVEL);
+
+    uint8_t hue = 85, level = 255;
+    if (snake_phase == SNAKE_OVER) {
+        hue   = 0;
+        level = (t / 150) % 2 ? 30 : 255;
+    } else if (snake_phase == SNAKE_PAUSED) {
+        level = 70 + scale8(sin8(timer_read32() >> 2), 110);
+    }
+    for (uint8_t i = snake_len; i-- > 1;) {
+        // Fades towards the tail, which shows the direction of travel.
+        uint8_t v = 230 - (uint16_t)i * 150 / snake_len;
+        snake_paint(snake_body[i], led_min, led_max, hue, 255, scale8(v, level));
+    }
+    snake_paint(snake_body[0], led_min, led_max, hue, 110, level);
+    if (snake_phase != SNAKE_OVER) {
+        snake_paint(snake_food, led_min, led_max, 0, 255, 170 + scale8(sin8(timer_read32() >> 1), 85));
+    }
+    return true;
+}
+
+#define BLOCKS_EMPTY_LEVEL 16 // faint, so the outline of the well shows
+
+// Returns true while the game owns the board.
+static bool draw_blocks(uint8_t led_min, uint8_t led_max) {
+    if (!blocks_phase) return false;
+    for (uint8_t i = led_min; i < led_max; i++) rgb_matrix_set_color(i, 0, 0, 0);
+    uint32_t t = timer_elapsed32(blocks_phase_at);
+
+    if (blocks_phase == BLOCKS_OVER && t > GAME_OVER_BLINK_MS) {
+        draw_game_number(blocks_cleared, led_min, led_max, 255);
+        return true;
+    }
+
+    uint8_t level = 255;
+    if (blocks_phase == BLOCKS_OVER) {
+        level = (t / 150) % 2 ? 30 : 255;
+    } else if (blocks_phase == BLOCKS_PAUSED) {
+        level = 70 + scale8(sin8(timer_read32() >> 2), 110);
+    }
+    for (uint8_t lane = 0; lane < BLOCKS_LANES; lane++) {
+        for (uint8_t depth = 0; depth < BLOCKS_DEPTH; depth++) {
+            uint8_t led = blocks_led[lane][depth];
+            if (led < led_min || led >= led_max) continue;
+            uint8_t cell = blocks_well[lane][depth];
+            if (!cell) {
+                paint(led, 0, 0, BLOCKS_EMPTY_LEVEL);
+            } else if (blocks_phase == BLOCKS_CLEARING && blocks_column_full(depth)) {
+                paint(led, 0, 0, 255);
+            } else if (blocks_phase == BLOCKS_OVER) {
+                paint(led, 0, 255, level);
+            } else {
+                paint(led, blocks_shapes[cell - 1].hue, 255, scale8(150, level));
+            }
+        }
+    }
+    if (blocks_phase == BLOCKS_FALLING || blocks_phase == BLOCKS_PAUSED) {
+        for (uint8_t i = 0; i < blocks_shapes[blocks_kind].cells; i++) {
+            int8_t depth = blocks_depth + blocks_piece[i].depth;
+            if (depth >= BLOCKS_DEPTH) continue; // still above the rim
+            uint8_t led = blocks_led[blocks_lane + blocks_piece[i].lane][depth];
+            if (led >= led_min && led < led_max) paint(led, blocks_shapes[blocks_kind].hue, 255, level);
+        }
+    }
+    return true;
+}
+
 bool rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max) {
     // Overlays follow the brightness knob, but never vanish completely.
     brightness = rgb_matrix_get_val() < 60 ? 60 : rgb_matrix_get_val();
+
+    if (draw_snake(led_min, led_max) || draw_blocks(led_min, led_max)) return false;
 
     // Later layers draw over earlier ones.
     draw_host_signal(led_min, led_max);

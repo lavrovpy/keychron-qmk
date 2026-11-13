@@ -1,21 +1,22 @@
 // kbsignal: light up the Keychron V1 from the Mac.
-//   kbsignal done|attention|error|clear   play a lighting signal
+//   kbsignal done|attention|error|clear|doom   play a lighting signal
 //   kbsignal flags                        show the Polish and Ukrainian flags for 20 s
 //   kbsignal wb GREEN BLUE                set the white balance gains (0-255) until unplugged
 //   kbsignal debounce                     print the debounce setting stored on the board
+//   kbsignal keymap-reset                 make the key layout saved on the board match keymap.c
 // Exits 0 when the keyboard is absent, so hooks that call it never fail.
 // Build: swiftc -O kbsignal.swift -o ~/.local/bin/kbsignal
 
 import Foundation
 import IOKit.hid
 
-let signals: [String: UInt8] = ["done": 1, "attention": 2, "error": 3, "clear": 4, "wb": 5, "flags": 6]
+let signals: [String: UInt8] = ["done": 1, "attention": 2, "error": 3, "clear": 4, "wb": 5, "flags": 6, "doom": 7]
 let debounceNames = ["defer global", "defer per row", "defer per key", "eager per row",
                      "eager per key", "eager press / deferred release per key", "none"]
-let usage = "usage: kbsignal done|attention|error|clear|flags|debounce, or kbsignal wb GREEN BLUE\n"
+let usage = "usage: kbsignal done|attention|error|clear|doom|flags|debounce|keymap-reset, or kbsignal wb GREEN BLUE\n"
 
 let args = Array(CommandLine.arguments.dropFirst())
-guard let command = args.first, command == "debounce" || signals[command] != nil else {
+guard let command = args.first, command == "debounce" || command == "keymap-reset" || signals[command] != nil else {
     FileHandle.standardError.write(usage.data(using: .utf8)!)
     exit(2)
 }
@@ -52,6 +53,8 @@ var packet = [UInt8](repeating: 0, count: 32)
 if command == "debounce" {
     packet[0] = 0xA7 // Keychron misc command group
     packet[1] = 0x05 // debounce get
+} else if command == "keymap-reset" {
+    packet[0] = 0x06 // VIA dynamic keymap reset
 } else {
     packet[0] = 0x07 // VIA custom set value
     packet[1] = 0x00 // custom channel
@@ -77,4 +80,11 @@ if command == "debounce" {
     }
     let type = Int(r[4])
     print("\(type < debounceNames.count ? debounceNames[type] : "type \(type)"), \(r[5]) ms")
+}
+if command == "keymap-reset" {
+    guard let r = reply, r.first == 0x06 else {
+        print("no reply: the saved key layout was not reset")
+        exit(1)
+    }
+    print("Saved key layout now matches keymap.c")
 }
